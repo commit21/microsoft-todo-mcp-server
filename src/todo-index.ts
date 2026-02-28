@@ -1912,6 +1912,215 @@ server.tool(
   },
 )
 
+// Tool to add a file attachment to a task
+server.tool(
+  "add-file-attachment",
+  "Add a file attachment to a task in Microsoft Todo. The file content should be provided as base64-encoded data. For text files, you can provide the raw text content and set contentType to the appropriate MIME type.",
+  {
+    listId: z.string().describe("ID of the task list"),
+    taskId: z.string().describe("ID of the task"),
+    name: z.string().describe("File name with extension (e.g., 'notes.json', 'document.txt')"),
+    contentBytes: z.string().describe("Base64-encoded file content"),
+    contentType: z.string().describe("MIME type of the file (e.g., 'application/json', 'text/plain')"),
+  },
+  async ({ listId, taskId, name, contentBytes, contentType }) => {
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Failed to authenticate with Microsoft API",
+            },
+          ],
+        }
+      }
+
+      const requestBody = {
+        "@odata.type": "#microsoft.graph.taskFileAttachment",
+        name,
+        contentBytes,
+        contentType,
+      }
+
+      const response = await makeGraphRequest<{ id: string; name: string; size: number }>(
+        `${MS_GRAPH_BASE}/me/todo/lists/${listId}/tasks/${taskId}/attachments`,
+        token,
+        "POST",
+        requestBody,
+      )
+
+      if (!response) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Failed to add attachment "${name}" to task`,
+            },
+          ],
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Attachment added successfully!\nName: ${response.name}\nID: ${response.id}\nSize: ${response.size} bytes`,
+          },
+        ],
+      }
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error adding attachment: ${error}`,
+          },
+        ],
+      }
+    }
+  },
+)
+
+// Tool to get attachments for a task
+server.tool(
+  "get-attachments",
+  "Get all file attachments for a specific task in Microsoft Todo. Returns attachment names, IDs, sizes, and content types.",
+  {
+    listId: z.string().describe("ID of the task list"),
+    taskId: z.string().describe("ID of the task"),
+  },
+  async ({ listId, taskId }) => {
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Failed to authenticate with Microsoft API",
+            },
+          ],
+        }
+      }
+
+      const response = await makeGraphRequest<{ value: Array<{ id: string; name: string; size: number; contentType: string }> }>(
+        `${MS_GRAPH_BASE}/me/todo/lists/${listId}/tasks/${taskId}/attachments`,
+        token,
+      )
+
+      if (!response || !response.value) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Failed to get attachments or no attachments found",
+            },
+          ],
+        }
+      }
+
+      if (response.value.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "No attachments found for this task",
+            },
+          ],
+        }
+      }
+
+      const attachmentList = response.value
+        .map((a) => `Name: ${a.name}\nID: ${a.id}\nSize: ${a.size} bytes\nType: ${a.contentType}\n---`)
+        .join("\n")
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Attachments for task:\n\n${attachmentList}`,
+          },
+        ],
+      }
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error getting attachments: ${error}`,
+          },
+        ],
+      }
+    }
+  },
+)
+
+// Tool to delete an attachment from a task
+server.tool(
+  "delete-attachment",
+  "Delete a file attachment from a task in Microsoft Todo.",
+  {
+    listId: z.string().describe("ID of the task list"),
+    taskId: z.string().describe("ID of the task"),
+    attachmentId: z.string().describe("ID of the attachment to delete"),
+  },
+  async ({ listId, taskId, attachmentId }) => {
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Failed to authenticate with Microsoft API",
+            },
+          ],
+        }
+      }
+
+      const url = `${MS_GRAPH_BASE}/me/todo/lists/${listId}/tasks/${taskId}/attachments/${attachmentId}`
+      const headers = {
+        "User-Agent": USER_AGENT,
+        Authorization: `Bearer ${token}`,
+      }
+
+      const response = await fetch(url, { method: "DELETE", headers })
+
+      if (!response.ok && response.status !== 204) {
+        const errorText = await response.text()
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Failed to delete attachment: ${response.status} ${errorText}`,
+            },
+          ],
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Attachment deleted successfully!",
+          },
+        ],
+      }
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error deleting attachment: ${error}`,
+          },
+        ],
+      }
+    }
+  },
+)
+
 // Main function to start the server
 export async function startServer(config?: ServerConfig): Promise<void> {
   try {

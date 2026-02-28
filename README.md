@@ -1,13 +1,13 @@
 # Microsoft To Do MCP
 
-[![CI](https://github.com/jordanburke/microsoft-todo-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/jordanburke/microsoft-todo-mcp-server/actions/workflows/ci.yml)
+[![CI](https://github.com/commit21/microsoft-todo-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/commit21/microsoft-todo-mcp-server/actions/workflows/ci.yml)
 [![npm version](https://badge.fury.io/js/microsoft-todo-mcp-server.svg)](https://www.npmjs.com/package/microsoft-todo-mcp-server)
 
 A Model Context Protocol (MCP) server that enables AI assistants like Claude and Cursor to interact with Microsoft To Do via the Microsoft Graph API. This service provides comprehensive task management capabilities through a secure OAuth 2.0 authentication flow.
 
 ## Features
 
-- **15 MCP Tools**: Complete task management functionality including lists, tasks, checklist items, and organization features
+- **19 MCP Tools**: Complete task management functionality including lists, tasks, checklist items, file attachments, and organization features
 - **Seamless Authentication**: Automatic token refresh with zero manual intervention
 - **OAuth 2.0 Authentication**: Secure authentication with automatic token refresh
 - **Microsoft Graph API Integration**: Direct integration with Microsoft's official API
@@ -46,7 +46,7 @@ The package provides three command aliases:
 ### Option 2: Clone and Run Locally
 
 ```bash
-git clone https://github.com/jordanburke/microsoft-todo-mcp-server.git
+git clone https://github.com/commit21/microsoft-todo-mcp-server.git
 cd microsoft-todo-mcp-server
 pnpm install
 pnpm run build
@@ -127,7 +127,7 @@ export MS_TODO_REFRESH_TOKEN=your_refresh_token
 
 ```bash
 # If installed globally
-git clone https://github.com/jordanburke/microsoft-todo-mcp-server.git
+git clone https://github.com/commit21/microsoft-todo-mcp-server.git
 cd microsoft-todo-mcp-server
 pnpm install
 pnpm run auth
@@ -207,7 +207,7 @@ pnpm run typecheck    # TypeScript type checking
 
 ## MCP Tools
 
-The server provides 13 tools for comprehensive Microsoft To Do management:
+The server provides 19 tools for comprehensive Microsoft To Do management:
 
 ### Authentication
 
@@ -229,12 +229,18 @@ The server provides 13 tools for comprehensive Microsoft To Do management:
 - **`update-task`** - Update any task properties
 - **`delete-task`** - Delete a task and all its checklist items
 
-### Checklist Items (Subtasks)
+### Checklist Items (Subtasks/Steps)
 
 - **`get-checklist-items`** - Get subtasks for a specific task
 - **`create-checklist-item`** - Add a new subtask to a task
 - **`update-checklist-item`** - Update subtask text or completion status
 - **`delete-checklist-item`** - Remove a specific subtask
+
+### File Attachments
+
+- **`add-file-attachment`** - Attach a file to a task (base64-encoded content)
+- **`get-attachments`** - List all file attachments on a task
+- **`delete-attachment`** - Remove a file attachment from a task
 
 ## Architecture
 
@@ -335,11 +341,11 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 ## Acknowledgments
 
-- Fork of [@jhirono/todomcp](https://github.com/jhirono/todomcp)
+- Originally forked from [jordanburke/microsoft-todo-mcp-server](https://github.com/jordanburke/microsoft-todo-mcp-server)
 - Built on the [Model Context Protocol SDK](https://github.com/modelcontextprotocol/sdk)
 - Uses [Microsoft Graph API](https://developer.microsoft.com/en-us/graph)
 
 ## Support
 
-- [GitHub Issues](https://github.com/jordanburke/microsoft-todo-mcp-server/issues)
+- [GitHub Issues](https://github.com/commit21/microsoft-todo-mcp-server/issues)
 - [npm Package](https://www.npmjs.com/package/microsoft-todo-mcp-server)
