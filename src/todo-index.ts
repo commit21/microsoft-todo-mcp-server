@@ -1735,6 +1735,243 @@ server.tool(
   },
 )
 
+// Reorganize flat tasks into category tasks with checklist items
+server.tool(
+  "reorganize-list",
+  "Reorganize flat tasks in a list into category tasks with checklist items (subtasks). Takes a grouping spec and creates category parent tasks, moves matching task titles as checklist items under each category, and optionally deletes the originals. Includes dry-run for preview and idempotency checks to prevent duplicates.",
+  {
+    listId: z.string().describe("ID of the list to reorganize"),
+    categories: z
+      .array(
+        z.object({
+          title: z.string().describe("Category task title (e.g. 'Planning (2 weeks out)')"),
+          taskTitles: z
+            .array(z.string())
+            .describe(
+              "Titles of existing tasks to move under this category as checklist items. Matched case-insensitively.",
+            ),
+        }),
+      )
+      .describe("Category groupings — each becomes a parent task with checklist items"),
+    deleteOriginals: z
+      .boolean()
+      .default(true)
+      .describe("Delete original flat tasks after reorganizing (default: true)"),
+    dryRun: z
+      .boolean()
+      .default(false)
+      .describe("Preview changes without executing (default: false)"),
+  },
+  async ({ listId, categories, deleteOriginals, dryRun }) => {
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Failed to authenticate with Microsoft API",
+            },
+          ],
+        }
+      }
+
+      // 1. FETCH current tasks
+      const tasksResponse = await makeGraphRequest<{ value: Task[] }>(
+        `${MS_GRAPH_BASE}/me/todo/lists/${listId}/tasks`,
+        token,
+      )
+
+      if (!tasksResponse || !tasksResponse.value) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Failed to retrieve tasks from list",
+            },
+          ],
+        }
+      }
+
+      const existingTasks = tasksResponse.value
+
+      // 2. IDEMPOTENCY CHECK — if category tasks already exist, abort
+      const existingTitlesLower = new Set(existingTasks.map((t) => t.title.toLowerCase()))
+      const alreadyExists = categories.filter((c) => existingTitlesLower.has(c.title.toLowerCase()))
+      if (alreadyExists.length > 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `⚠️ Idempotency check failed. These category tasks already exist in the list:\n` +
+                alreadyExists.map((c) => `- ${c.title}`).join("\n") +
+                `\n\nDelete them first or rename your categories to avoid duplicates.`,
+            },
+          ],
+        }
+      }
+
+      // 3. MATCH — find task IDs for each taskTitle
+      const tasksByTitleLower = new Map<string, Task>()
+      for (const task of existingTasks) {
+        tasksByTitleLower.set(task.title.toLowerCase(), task)
+      }
+
+      const matchedTaskIds: string[] = []
+      const unmatchedTitles: string[] = []
+      const categoryMatches: { category: string; matched: string[]; unmatched: string[] }[] = []
+
+      for (const cat of categories) {
+        const matched: string[] = []
+        const unmatched: string[] = []
+
+        for (const title of cat.taskTitles) {
+          const task = tasksByTitleLower.get(title.toLowerCase())
+          if (task) {
+            matched.push(task.title)
+            matchedTaskIds.push(task.id)
+          } else {
+            unmatched.push(title)
+            unmatchedTitles.push(title)
+          }
+        }
+
+        categoryMatches.push({ category: cat.title, matched, unmatched })
+      }
+
+      // 4. DRY RUN
+      if (dryRun) {
+        let preview = `📋 Reorganize Preview\n\n`
+        preview += `List has ${existingTasks.length} tasks. Will create ${categories.length} category tasks.\n\n`
+
+        for (const cm of categoryMatches) {
+          preview += `📁 ${cm.category}\n`
+          for (const m of cm.matched) {
+            preview += `  ✓ ${m}\n`
+          }
+          for (const u of cm.unmatched) {
+            preview += `  ✗ ${u} (NOT FOUND)\n`
+          }
+        }
+
+        if (deleteOriginals) {
+          preview += `\n🗑️ Will delete ${matchedTaskIds.length} original tasks after reorganizing.`
+        }
+
+        if (unmatchedTitles.length > 0) {
+          preview += `\n\n⚠️ ${unmatchedTitles.length} task title(s) did not match any existing tasks.`
+        }
+
+        return { content: [{ type: "text", text: preview }] }
+      }
+
+      // 5. CREATE category tasks + checklist items
+      let createdCategories = 0
+      let createdItems = 0
+      let failedItems: string[] = []
+
+      for (const cat of categories) {
+        try {
+          const newTask = await makeGraphRequest<Task>(
+            `${MS_GRAPH_BASE}/me/todo/lists/${listId}/tasks`,
+            token,
+            "POST",
+            { title: cat.title },
+          )
+
+          if (!newTask || !newTask.id) {
+            failedItems.push(`Category: ${cat.title}`)
+            continue
+          }
+
+          createdCategories++
+
+          // Add checklist items
+          for (const title of cat.taskTitles) {
+            const sourceTask = tasksByTitleLower.get(title.toLowerCase())
+            const displayName = sourceTask ? sourceTask.title : title
+
+            try {
+              await makeGraphRequest(
+                `${MS_GRAPH_BASE}/me/todo/lists/${listId}/tasks/${newTask.id}/checklistItems`,
+                token,
+                "POST",
+                { displayName },
+              )
+              createdItems++
+            } catch (error) {
+              failedItems.push(`Item: ${displayName}`)
+            }
+          }
+        } catch (error) {
+          failedItems.push(`Category: ${cat.title}`)
+        }
+      }
+
+      // 6. DELETE originals
+      let deletedCount = 0
+      let deleteFailures: string[] = []
+
+      if (deleteOriginals) {
+        for (const taskId of matchedTaskIds) {
+          try {
+            await makeGraphRequest(
+              `${MS_GRAPH_BASE}/me/todo/lists/${listId}/tasks/${taskId}`,
+              token,
+              "DELETE",
+            )
+            deletedCount++
+          } catch (error) {
+            const task = existingTasks.find((t) => t.id === taskId)
+            deleteFailures.push(task?.title || taskId)
+          }
+        }
+      }
+
+      // 7. REPORT
+      let result = `✅ Reorganize Complete\n\n`
+      result += `Created ${createdCategories} category tasks with ${createdItems} checklist items.\n`
+
+      if (deleteOriginals) {
+        result += `Deleted ${deletedCount} original tasks.\n`
+      }
+
+      if (failedItems.length > 0) {
+        result += `\n⚠️ Failed to create:\n`
+        failedItems.forEach((item) => {
+          result += `- ${item}\n`
+        })
+      }
+
+      if (deleteFailures.length > 0) {
+        result += `\n⚠️ Failed to delete:\n`
+        deleteFailures.forEach((title) => {
+          result += `- ${title}\n`
+        })
+      }
+
+      if (unmatchedTitles.length > 0) {
+        result += `\n⚠️ Unmatched task titles (not found in list):\n`
+        unmatchedTitles.forEach((title) => {
+          result += `- ${title}\n`
+        })
+      }
+
+      return { content: [{ type: "text", text: result }] }
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error reorganizing list: ${error}`,
+          },
+        ],
+      }
+    }
+  },
+)
+
 // Test tool to explore Graph API for hidden properties
 server.tool(
   "test-graph-api-exploration",
